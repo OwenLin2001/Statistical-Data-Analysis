@@ -1,0 +1,216 @@
+---
+title: "Stats 111 Homework 5"
+author: "Owen Lin"
+output: html_document
+---
+```{r, include=F}
+library(pROC)
+library(nnet)
+
+ifelse1 =function(test, x, y){ if (test) x else y}
+
+#  Function to exponentiate coefficients and produces CIs for GLMs
+glmCI <- function( model, transform=TRUE, robust=FALSE ){
+	link <- model$family$link
+	coef <- summary( model )$coef[,1]
+	se <- ifelse1( robust, robust.se.glm(model)[,2], summary( model )$coef[,2] )
+	zvalue <- coef / se
+	pvalue <- 2*(1-pnorm(abs(zvalue)))
+
+	if( transform & is.element(link, c("logit","log")) ){
+		ci95.lo <- exp( coef - qnorm(.975) * se )
+		ci95.hi <- exp( coef + qnorm(.975) * se )
+		est <- exp( coef )
+	}
+	else{
+		ci95.lo <- coef - qnorm(.975) * se
+		ci95.hi <- coef + qnorm(.975) * se
+		est <- coef
+	}
+	rslt <- round( cbind( est, ci95.lo, ci95.hi, zvalue, pvalue ), 4 )
+	colnames( rslt ) <- ifelse1( 	robust, 	
+					c("Est", "robust ci95.lo", "robust ci95.hi", "robust z value", "robust Pr(>|z|)"),
+					c("Est", "ci95.lo", "ci95.hi", "z value", "Pr(>|z|)") )			
+	colnames( rslt )[1] <- ifelse( transform & is.element(link, c("logit","log")), "exp( Est )", "Est" )
+	rslt
+	}
+
+#	Function to estimate linear contrasts of coefficients from a GLM fit
+linContr.glm <- function( contr.names, contr.coef=rep(1,length(contr.names)), model, transform=TRUE ){
+	beta.hat <- model$coef 
+	cov.beta <- vcov( model )
+
+	contr.index <- match( contr.names, dimnames( cov.beta )[[1]] )	
+	beta.hat <- beta.hat[ contr.index ]
+	cov.beta <- cov.beta[ contr.index,contr.index ]
+	est <- contr.coef %*% beta.hat
+	se.est <- sqrt( contr.coef %*% cov.beta %*% contr.coef )
+	zStat <- est / se.est
+	pVal <- 2*pnorm( abs(zStat), lower.tail=FALSE )
+	ci95.lo <- est - qnorm(.975)*se.est
+	ci95.hi <- est + qnorm(.975)*se.est
+	
+	link <- model$family$link
+	if( transform & is.element(link, c("logit","log")) ){
+		ci95.lo <- exp( ci95.lo )
+		ci95.hi <- exp( ci95.hi )
+		est <- exp( est )
+		cat( "\nTest of H_0: exp( " )
+		for( i in 1:(length( contr.names )-1) ){
+			cat( contr.coef[i], "*", contr.names[i], " + ", sep="" )
+			}
+		cat( contr.coef[i+1], "*", contr.names[i+1], " ) = 1 :\n\n", sep="" )		
+		}
+	else{
+		cat( "\nTest of H_0: " )
+		for( i in 1:(length( contr.names )-1) ){
+			cat( contr.coef[i], "*", contr.names[i], " + ", sep="" )
+			}
+		cat( contr.coef[i+1], "*", contr.names[i+1], " = 0 :\n\n", sep="" )
+		}
+	rslt <- data.frame( est, se.est, zStat, pVal, ci95.lo, ci95.hi )
+	colnames( rslt )[1] <- ifelse( transform && is.element(link, c("logit","log")), "exp( Est )", "Est" )
+	round( rslt, 8 )
+}
+
+# Deviance test (likelihood ratio)
+lrtest <- function( fit1, fit2 ){
+	cat( "\nAssumption: Model 1 nested within Model 2\n\n" )
+	rslt <- anova( fit1, fit2 )
+	rslt <- cbind( rslt, c("", round( pchisq( rslt[2,4], rslt[2,3], lower.tail=FALSE ), 4 ) ) )
+	rslt[,2] <- round( rslt[,2], 3 )
+	rslt[,4] <- round( rslt[,4], 3 )
+	rslt[1,3:4] <- c( "", "" )
+	names( rslt )[5] <- "pValue"
+	rslt
+}
+
+# H-L goodness of fit test
+binary.gof <- function( fit, ngrp=10, print.table=TRUE ){
+	y <- fit$y
+	phat <- fitted( fit )
+	fittedgrps <- cut( phat, quantile( phat, seq(0,1,by=1/ngrp) ), include.lowest=TRUE )
+	n <- aggregate( y, list( fittedgrps ), FUN=length )[,2]
+	Obs <- aggregate( y, list( fittedgrps ), FUN=sum )[,2]
+	Exp <- aggregate( phat, list( fittedgrps ), FUN=sum )[,2]
+	if( print.table==TRUE ){
+		cat( "\nFitted Probability Table:\n\n" )
+		rslt <- as.data.frame( cbind( 1:ngrp, n, Obs, Exp ) )
+		names( rslt )[1] <- "group"
+		print( rslt )
+	}
+	chisqstat <- sum( (Obs - Exp)^2 / ( Exp*(1-Exp/n) ) )
+	df <- ngrp-2
+	pVal <- pchisq( chisqstat, df, lower.tail=FALSE )
+	cat( "\n Hosmer-Lemeshow GOF Test:\n\n" )
+	cbind( chisqstat, df, pVal )
+}
+
+# Function to compute robust se for glms
+robust.se.glm<-function(glm.obj){
+	## 	Compute robust (sandwich) variance estimate
+	if (is.matrix(glm.obj$x)) 
+		xmat<-glm.obj$x
+	else {
+		mf<-model.frame(glm.obj)
+		xmat<-model.matrix(terms(glm.obj),mf)		
+	}
+	umat <- residuals(glm.obj,"working")*glm.obj$weights*xmat
+	modelv<-summary(glm.obj)$cov.unscaled
+	robust.cov <- modelv%*%(t(umat)%*%umat)%*%modelv
+	
+	##	Format the model output with p-values and CIs
+	s <- summary( glm.obj) 
+	robust.se <- sqrt( diag( robust.cov )) 
+	z <- glm.obj$coefficients/robust.se
+	p <- 2*pnorm( -abs( z ) ) 
+	ci95.lo <- glm.obj$coefficients - qnorm( .975 ) * robust.se
+	ci95.hi <- glm.obj$coefficients + qnorm( .975 ) * robust.se
+	rslt <- cbind( glm.obj$coefficients, robust.se, ci95.lo, ci95.hi, z, p ) 
+	dimnames(rslt)[[2]] <- c( dimnames( s$coefficients )[[2]][1], "Robust SE", "ci95.lo", "ci95.hi", dimnames( s$coefficients )[[2]][3:4] ) 
+	rslt 
+	}
+```
+
+
+1. a. The model doesn't need an offset term. $\ln(Admissions) = \beta_0 + \beta_1*Temperature$.
+	b. $\ln(Admissions) = 1.971 + 0.025*Temperature$. <br>
+	1 Fahrenheit increase in temperature leads to a relative change in expected count by $e^{0.025}$. <br>
+	15 Fahrenheit increase in temperature leads to a relative change in expected count by $e^{0.025*15}$.
+```{r, results = "hold"}
+ERtemp = read.csv("D:\\Coding\\Stats111\\Data\\ERtemp.csv", header=TRUE)
+ER.model = glm(Admissions~Temperature, family=poisson, data=ERtemp)
+summary(ER.model)
+```
+
+c. The expected count of events when the temperature is 85 degrees is 62.274. The 95% CI for the true expected count is (61.078, 63.493), that we are 95% confident that the true expected count when temperature is 85 degress is between 61.078 and 63.493.
+```{r}
+linContr.glm(c("(Intercept)", "Temperature"), c(1, 85), model = ER.model)
+```
+d. H0: $\beta_1 = 0$ <br>
+Ha: $\beta_1 \neq 0$<br>
+p-value: ~= 0<br>
+conclusion: We reject the null and conclude that the coefficient on temperature is not 0 (it's significant).
+e. Null Deviance: 1461.60 <br>
+Residual Deviance: 184.97 <br>
+The difference is huge, which support the same conclusion in part d) where temp does gave us information about the expected count in ER Admissions.
+
+2. a. Always using a condom leads to a relative change in expected count by $e^{-0.373}$ to those who don't. <br>
+The expected number of reinfections for someone who always wears a condom and is followed for 5 years is $5*e^{-0.373}$
+```{r, result = "hold"}
+std = read.csv("D:\\Coding\\Stats111\\Data\\stdgrp.csv")
+std.model = glm(n.reinfect~condom.always+offset(log(yrsfu)), family=poisson, data=std)
+summary(std.model)
+# model = glm(n.reinfect~condom.always, family = poisson, data = std, offset = log(yrsfu))
+```
+
+b. Always using a condom leads to a relative change in expected count by $e^{-0.362}$ to those who don't, holding education level and ethnicity the same.
+```{r, result = "hold"}
+std.model2 = glm(n.reinfect~white+condom.always+edugrp+offset(log(yrsfu)), family=poisson, data=std)
+coef(std.model2)
+```
+c. H0: $\beta_1 = \beta_3 = \beta_4 = 0$ <br>
+Ha: H0 is not true <br>
+test statistic: 22.395 ~ chi_squared(3) <br>
+p-value: ~= 0.0001 <br>
+conclusion: We reject the null and conclude that race or education level (or both) is significant.
+```{r}
+lrtest(std.model,std.model2)
+```
+
+d. WLOG, we are 95% confident that going from [11.9, 12.9] edugrp to [12.9, 18] edugrp leads to a relative change in rate that is between 0.465 and 0.981. <br>
+The estimated rate for the lowest education group (less than 12), that has white=0 and condom.always=0 is $e^{-0.76+0.21}$ = 0.577. 
+e. The 95% confidence interval for the relative change in rate for condom.always is (0.556, 0.872) holding education and race status constant. <br>
+We are 95% confident that always using condom will result in a relative change in rate that is between 0.556 and 0.872. 
+```{r}
+glmCI(std.model2)
+```
+
+3. a. See output
+```{r}
+abortion = read.table("D:\\Coding\\Stats111\\Data\\abortion.txt", col.names=c("year", "rel", "edu", "att", "count"))
+mfit.abort = multinom( att ~ edu+rel, data=abortion, weights=count )
+summary(mfit.abort)
+```
+
+b. $\ln{\frac{P(Y_i = Neg | X_i)}{P(Y_i = Mixed | X_i)}}= \beta_{0, Neg} + \beta_{1, Neg}* Edu + \beta_{2, Neg}* religion$ <br>
+$\ln{\frac{P(Y_i = Pos | X_i)}{P(Y_i = Mixed | X_i)}}= \beta_{0, Pos} + \beta_{1, Pos}* Edu + \beta_{2, Pos}* religion$
+c. For someone with low education and religion being protestant: <br>
+the probabilities of having Positive attitude is 0.719<br>
+the probabilities of having Negative attitude is 0.082<br>
+the probabilities of having Mixed attitude is 0.199<br>
+For someone with high education and religion being protestant: <br>
+the probabilities of having Positive attitude is 0.889<br>
+the probabilities of having Negative attitude is 0.032<br>
+the probabilities of having Mixed attitude is 0.079<br>
+The probability of having Positive attitude as a Protestant increased by 0.889 - 0.719 = 0.17 percent when comparing low education to high education.
+
+```{r}
+# Predict probabilties using multinomial distribution
+newdata = data.frame(edu="Low", rel="Prot")
+predict(mfit.abort, type="probs", newdata=newdata)
+
+# Another predicition
+newdata = data.frame(edu="High", rel="Prot")
+predict(mfit.abort, type="probs", newdata=newdata)
+```

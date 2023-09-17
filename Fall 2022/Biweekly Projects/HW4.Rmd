@@ -1,0 +1,164 @@
+---
+title: "Stats 110 Homework 4"
+author: "Owen Lin"
+date: 11/16/2022
+output: html_document
+---
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Coding/Stats110/Data")
+library(car)
+library(leaps)
+getwd()
+```
+
+1. a. This observation will have a small influence on the estimate $\hat{\beta_1}$. The main effect will be on the intercept estimate: the regression line will shift accordingly rather than a change in slope estimate.
+    b. This observation will have no influence on the estimate of $\hat{\beta_1}$, because even though it is an outlier in X, it still locates around on the regression line.
+    c. This observation will have a large influence on both estimates. The regression line needs to be flatten/steepen in order to minimize the square of residual from the outlier at the cost of all other observations.
+<br>
+2. a. It seems pretty linear other than the top right cluster.
+    b. The adjusted r-squared is 0.773.
+    c. See output.
+```{r,results = "hold", error = FALSE}
+bm <- read.csv("bodymass.csv", fill = TRUE, header = TRUE)
+plot(bm$height, bm$bodymass)
+model1 <- lm(bodymass ~ height, data = bm)
+abline(model1)
+summary(model1)$adj.r.squared
+plot(model1, 1)
+plot(model1, 2)
+```
+
+d. Linearity assumptions is invalidated by the graph while normality assumption holds for the linear regression model.
+e. See output
+```{r}
+model2 <- lm(bodymass ~ height + I(height^2), data = bm)
+summary(model2)
+```
+
+f. H0: $\beta_2 = 0$ <br>
+    Ha: $\beta \neq 0$ <br>
+    Test-statistic: 3.914 ~ t(97+2+1) <br>
+    p-value: 0.000169 < 0.05 <br>
+    Conclusion: reject the null at 95% significant level and conclude that we need quadratic term in the model.
+g. The adjusted r-squared is 0.802 > 0.773, there is an improvement.
+h. The line is flatten comparing to the model without quadratic term, but there is still some deviation away from 0.
+```{r}
+plot(model2, 1)
+summary(model1)
+```
+
+i. H0: $\beta_1 = \beta_2 =  0$ <br>
+    Test-statistic: 201.4 ~ F(2, 97) <br>
+    p-value: < 2.2e-16 <br>
+    Conclusion: reject the null at 95% significant level and conclude that height has an influence on bodymass.
+j. The vif of height and height^2 is the same. That means regress height^2 on height or regress height on height^2 result in the same R-squared. (In fact, if there's only 2 covariates in the regression equation, the vif will always be the same. We can prove it by the definition R = corr^2 and corr = cov(x,y)/(var(x)*var(y))).
+```{r, results = "hold"}
+vif(model2)
+```
+
+k. If a subject who is 170cm tall increases height by 1cm, we expect the bodymass to increase by $-2.07 + (171^2 - 170^2)*0.0091 = 1.0331$ kg. <br>
+    if the increased height is 5cm, we expect the body mass to increase by $-2.07*5 + (175^2 - 170^2)*0.0091 = 5.3475$ kg.
+l. The 64th observation has the highest leverage, the large x-value causes it to have a high leverage (with the highest x-value).
+```{r}
+bm$leverage <- hatvalues(model2)
+head(bm[order(bm$leverage, decreasing=TRUE),])
+summary(bm)
+```
+
+<br>
+3. a. cor(male, female) = -1 <br>
+    cor(RtFoot, LeftFoot) = 0.9438 <br>
+    cor(HeadCirc, RtFoot) = 0.4754 <br>
+    cor(HeadCirc, LeftFoot) = 0.4666 <br>
+    cor(HeadCirc, Male) = 0.4894 <br>
+```{r}
+physical <- read.table("PhysicalData.txt", fill = TRUE, header = TRUE)
+round(cor(physical), 4)
+```
+
+b. The model fail to give a estimate to female because male and female are perfectly multicolinear.
+```{r}
+model3b <- lm(HeadCirc ~ Male + Female, data = physical)
+summary(model3b)
+```
+
+c. $HeadCirc = 50.621 + 1.367*Male + 0.219*RtFoot$. The adjusted R-squared is 0.2433
+```{r}
+model3c <- lm(HeadCirc ~ Male + RtFoot, data = physical)
+summary(model3c)
+```
+
+d. Observation 5 and 3 have the two highest leverage values. One has the highest RtFoot value and one has a very low RtFoot value.
+```{r, results = "hold"}
+physical$leverage <- hatvalues(model3c)
+head(physical[order(physical$leverage, decreasing = TRUE),])
+summary(physical)
+```
+e. See Output
+```{r, results = "hold"}
+plot(physical$RtFoot, physical$HeadCirc, xlab="Right Foot size" , ylab="Head Circumference")
+points(head(physical[order(physical$leverage, decreasing=TRUE),])[1,"RtFoot"], head(physical[order(physical$leverage, decreasing=TRUE),])[1,"HeadCirc"], col="red", cex=1.5 , pch=19)
+points(head(physical[order(physical$leverage, decreasing=TRUE),])[2,"RtFoot"], head(physical[order(physical$leverage, decreasing=TRUE),])[2,"HeadCirc"], col="red", cex=1.5 , pch=19)
+```
+
+f. $HeadCirc = 50.621 - 0.1132*LeftFoot + 0.3057*RtFoot + 1.478*Male$. The adjusted R-squared is 0.23.
+```{r, results = "hold"}
+model3f <- lm(HeadCirc ~ LeftFoot + RtFoot + Male, data = physical)
+summary(model3f)
+```
+
+g. No, adding RtFoot to the model only adds minimal amount to SSR (3.065)
+```{r, results = "hold"}
+anova(model3f)
+1.973^2 * (55-4)
+```
+
+h. SSE: $1.973^2 * (55-4) = 198.5292$ <br>
+    MSE: $SSE/n = 198.5292/55 = 3.6096$
+i. Both LeftFoot and RtFoot have a high VIF, indicating that we should drop one of them to avoid collinearity.
+```{r, results = "hold"}
+vif(model3f)
+```
+
+j. Observation 43 and 53 have the two highest leverage values.Both have a large RtFoot value of 28.
+```{r, results = "hold"}
+physical$leverage3f <- hatvalues(model3f)
+head(physical[order(physical$leverage3f, decreasing = TRUE),])
+summary(physical)
+```
+
+k. p-value: 0.3193 <br>
+    Conclusion: fail to reject the null, adding foot size to the model didn't improve the prediction of HeadCirc.
+```{r, results = "hold"}
+model3f_reduce <- lm(HeadCirc ~ Male, data = physical)
+anova(model3f_reduce, model3f)
+```
+
+l. $HeadCirc = \beta_0 + \beta_1 * Male + \beta_2 * LeftHand$. The adjusted R-squared is 0.2658.
+```{r, results = "hold"}
+full <- lm(HeadCirc~.-Female, data=physical)
+forward = step(lm(HeadCirc~1, data=physical), scope=list(upper=full), direction="forward")
+model3l <- lm(HeadCirc ~ Male + LeftHand, data = physical)
+summary(model3l)$adj.r.squared
+```
+
+m. 2-covariates: $HeadCirc = \beta_0 + \beta_1 * LeftHand + \beta_2 * Male$<br>
+    3-covariates: $HeadCirc = \beta_0 + \beta_1 * RtFoot + \beta_2 * LeftHand + \beta_3 * Male$
+```{r, results = "hold"}
+subsets <- regsubsets(HeadCirc~.-Female, data = physical)
+summary(subsets)
+```
+
+n. $HeadCirc = 46.047 + 0.148 * LeftFoot + 0.274 * RtFoot$ <br>
+    VIF is the same for both, and they are pretty high at 9.156.
+```{r, results = "hold"}
+model3n <- lm(HeadCirc ~ LeftFoot + RtFoot, data = physical)
+model3n$coef
+vif(model3n)
+```
+
+o. The estimated coefficient of the slope is 0.42, more than doubled comparing to model3n. Here's the logic: as LeftFoot increases, RtFoot is likely to increases as well. From model3n, we would expect HeadCirc to increase from effect of both LeftFoot and RtFoot. But sincet Foot is no long included in model3o, LeftFoot as the only regressor needs to take both effect into account (effect of RtFoot on HeadCirc is unseen in model3o).
+```{r, results = "hold"}
+model3o <- lm(HeadCirc ~ LeftFoot, data = physical)
+model3o$coef
+```

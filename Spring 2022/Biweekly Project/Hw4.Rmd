@@ -1,0 +1,255 @@
+---
+title: "Stats 112 Homework 4"
+author: "Owen Lin"
+output: html_document
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning=FALSE)
+knitr::opts_knit$set(root.dir = "D:\\Coding\\Stats112\\Data")
+library(tidyverse)
+library(nlme)
+library(ggplot2)
+library(mgcv)
+library(readr)
+library(geepack)
+library(lme4)
+```
+
+## Problem 1
+1a:  
+```{r}
+# setwd("")
+prog = read.csv("progesterone.csv", header = TRUE)
+
+prog %>% 
+  group_by(group) %>% 
+  ggplot(aes(time, PDG, group = id, color = as.factor(group))) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Day",
+       y = "Distance dental growth (mm)")
+
+```
+
+1b:  
+```{r}
+prog$group = as.factor(prog$group)
+prog = prog %>% 
+  mutate(timeSqr = time^2, timeCub = time^3)
+
+model1 = lme(PDG ~ time + group : time + timeSqr + group: timeSqr ,
+                     data = prog,
+                     random = ~ 1 + time + timeSqr| id,
+                     method = "REML")
+
+summary(model1)
+```
+
+1c:  
+We need to transform the residuals because not only do they have different variance, but they are also correlated with each other.
+```{r}
+res_population = residuals(model1, type = "response", level = 0)
+
+Sigma_i = extract.lme.cov(model1, prog)
+L_i = t(chol(Sigma_i)) #block matrix of lower triangular Cholesky factors
+res_transformed <- solve(L_i) %*% res_population
+tibble(r_star = res_transformed) %>% 
+  ggplot(aes(x = r_star)) +
+  geom_histogram(aes(y = stat(density)), bins = 14, color = "black", fill = "gray") +
+  geom_function(fun = dnorm, color = "blue") +
+  labs(x = "Residuals", y = "Density")
+```
+
+1d:  
+The smooth line is around 1, but at the predicted range of 0.7-0.8, there is a lot of outlier in transformed residuals.
+```{r}
+mu_hat = fitted(model1, level = 0)
+mu_hat_transformed = solve(L_i) %*% mu_hat
+abs_res_transformed = abs(res_transformed)
+
+tibble(x = mu_hat_transformed, y = abs_res_transformed) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_hline(yintercept = 0.8, linetype = "dashed") +
+  geom_point(shape = 1) +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Transformed Predicted Value", y = "Absolute Transformed Residual") 
+```
+
+1e:  
+The qq plot didn't fit well for the end points: there are a lot of outliers.
+```{r}
+tibble(r_star = res_transformed) %>% 
+  ggplot(aes(sample = r_star)) +
+  geom_qq_line(color = "blue") +
+  geom_qq(shape = 1) 
+  labs(x = "Quantiles of Standard Normal", y = "Quantiles of Transformed Residuals")
+```
+
+
+1f:  
+There are 9 potential outlying individuals with a p-value less than 0.05.
+```{r}
+mahalanobis_distance = function(x){
+  x <- as.matrix(x)
+  t(x) %*% x
+}
+
+mahalanobis_data <- tibble(id = prog$id, r_star = res_transformed) %>% 
+  group_by(id) %>% 
+  nest() %>% 
+  mutate(df = map_dbl(data, ~nrow(.x)))%>% 
+  mutate(d = map_dbl(data, ~mahalanobis_distance(.x)))%>% 
+  mutate(p_value = pchisq(d, df, lower.tail = FALSE))
+
+
+mahalanobis_data %>% 
+  arrange(p_value)
+
+sum(mahalanobis_data$p_value<0.05)
+```
+
+1g:  
+The Semi Variogram is not constant around 1. It goes up past 1 and then went below 1.
+```{r}
+Variogram(model1,
+          data = prog,
+          form = ~ 1 + time + timeSqr| id ,
+          resType = "normalized") %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = dist, y = variog)) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  geom_point(shape = 1) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.1)  
+```
+
+
+## Problem 2
+2a:  
+As month increases, the proportion of infection generally goes down for both treatments.
+```{r}
+toes = read.table("./toenail-data.txt", header=FALSE)
+names(toes) = c("ID","Y","Trt","Month","Visit")
+toes$Trt = factor(toes$Trt, levels=c(0,1), labels=c("Itra","Terb"))
+toes$ID = factor(toes$ID)
+
+visits = c(1,2,3,4,5,6,7)
+plot(visits, unlist(by(toes[toes$Trt=="Itra",]$Y, toes[toes$Trt=="Itra",5] , mean)), type="o", 
+   pch=16, col="blue",xlab="Visit", ylab="Moderate or Severe Outcome", 
+      main="Proportion Mod-Severe Outcomes by Treatment and Month", ylim=c(0,0.5))
+
+points(visits, unlist(by(toes[toes$Trt=="Terb",]$Y, toes[toes$Trt=="Terb",5] , mean)), type="o", 
+   pch=17, col="red")  
+   
+legend(6,.3,c("Itra","Terb"), col=c("blue","red"), pch=c(16,17))
+```
+
+2b:  
+$\ln{\frac{p}{1 - p}} = \beta_0 + \beta_1* month_{ij} + \beta_2* trt_i + \beta_3* month* trt_i$
+
+2c:  
+```{r}
+mod1gee= geeglm(Y ~ 1+Month*Trt , family=binomial, id=ID, corstr="exchangeable", data=toes)
+
+# mod2gee= geeglm(Y ~ 1+Month+Trt , family=binomial, id=ID, corstr="exchangeable", data=toes)
+
+# mod3gee = geeglm(Y ~ 1+Trt , family=binomial, id=ID, corstr="exchangeable", data=toes)
+summary(mod1gee)
+```
+
+2d:  
+For the existing treatment group (Itraconazole, trt = 0):  
+One unit increase in month result in $e^{-0.17128}$ relative change in the odd of getting moderate/severe infection.
+For the new treatment group (Terbinafine, trt = 1):  
+One unit increase in month result in $e^{-0.17128 - 0.07773}$ relative change in the odd of getting moderate/severe infection.
+
+2e:  
+Wald test concludes that Month should be in the model 
+```{r}
+V=mod1gee$geese$vbeta
+
+beta.hat = coef(mod1gee)
+L= matrix(c(0,1,0,0,0,0,0,1),2,4, byrow=TRUE)
+
+# (Matrix multiplication in R -->  %*% )
+# L %*% beta.hat
+# Wald statistic to test for interaction:
+# (Transpose in R --> t()
+#  Matrix inversion in R --> solve() )
+W2 = t(L%*%beta.hat) %*% solve(L%*%V%*%t(L)) %*% L%*%beta.hat
+# approximate p-value:
+pchisq(W2, df=1, lower.tail=FALSE)
+
+# anova(mod1gee, mod3gee)
+```
+
+2f:  
+Because in GEE, no likelihood function is assumed for the model.
+
+2g:  
+$\ln{\frac{p}{1 - p}} = \beta_0 + \beta_1* month_{ij} + \beta_2* trt_i + \beta_3* month_{ij}* trt_i + b_{0i}$
+
+2h:
+```{r}
+mod = glmer(Y ~ 1+Month*Trt  + (1 | ID), family=binomial, data=toes, nAGQ =  5) 
+summary(mod)
+```
+
+2i:  
+Fit another nested model with only treatment and random intercept. Then compare the AIC of the two.
+
+2j:  
+For the average subject with old treatment, 1 unit increase in Month result in a relative odd change of $e^{-0.3821}$  
+For the average subject with new treatment, 1 unit increase in Month result in a relative odd change of $e^{-0.3821 - 0.1336}$
+
+2k:  
+$\ln{\frac{p}{1 - p}} = 2.017 - 0.3821* Month_{ij} - 0.1298* trt_{i} - 0.1336* month_{ij}* trt_i$
+```{r}
+coef(mod)$ID[1,]
+```
+
+2l:  
+Model in part b (GEE) addresses the marginal model, and model in part g (GLMM) addresses the conditional model.
+
+## Problem 3
+3a:  
+$\ln{p} = \beta_0 + \beta_1* year_{ij} + \beta_2* trt_i + \beta_3* year_{ij}* trt_i$
+
+3b:  
+We are looking at count per row (given an id AND a year), so each count is relating to a year of observation and we shouldn't put a offset term.
+
+3c:
+```{r}
+skin = read.csv("skin.csv")
+
+skin$trt_num = skin$trt
+skin$trt = factor(skin$trt, levels=c('0','1'),labels=c('Placebo','beta carotene'))
+
+gee_2 = geeglm(y ~ year + trt + year*trt,data = skin,family = poisson(link = "log"),id = id,  corstr = "ar1")
+summary(gee_2)
+```
+
+3d:  
+Going from no treatment to having a treatment, the main effect results in a relative count change of new skin cancers per year by $e^{0.0657}$  
+
+3e:  
+For the no treatment group, one year increase results in a relative count change of $e^{-0.0116}$  
+
+3f:  
+For the treatment group, one year increase will results in an additional $e^{0.0327}$ relative count change of new skin cancers per year.  
+
+3g:  
+$\ln{p} = \beta_0 + \beta_1* year_{ij} + \beta_2* trt_i + \beta_3* year_{ij}* trt_i + b_{0i} + b_{1i}* year_{ij}$  
+
+3h:  
+```{r}
+glmm_3 = glmer(y ~ year+trt+trt*year + (1+year | id), family=poisson, data=skin , nAGQ=0)
+summary(glmm_3)  
+```
+
+3i:  
+For an average subject in the no treatment group, one year increase results in a relative count change of $e^{-0.0365}$  
+
+3j:  
+For an average subject in the treatment group, one year increase will results in an additional $e^{0.0209}$ relative count change of new skin cancers per year.  

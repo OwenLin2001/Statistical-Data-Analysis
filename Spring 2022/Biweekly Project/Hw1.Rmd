@@ -1,0 +1,166 @@
+---
+title: "Stats 112 Homework 1"
+author: "Owen Lin"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning=FALSE)
+```
+
+
+```{r, include = F}
+# Load Required Packages
+library(lattice)
+library(nlme)
+library(lme4)
+library(survival)
+
+library(tidyverse)
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(stringr)
+```
+
+
+## Problem 1
+1a and 1b:
+```{r}
+epilepsy = read.table("D:\\Coding\\Stats112\\Data\\epilepsy.txt", header=TRUE)
+epilepsy[,4] = epilepsy[,4]/8
+epilepsy[,c(5:8)] = epilepsy[,c(5:8)]/2
+epi.long = reshape(epilepsy, idvar="ID", varying=list(4:8),v.names="Rate", timevar="Time", times=c(0,2,4,6,8),direction="long")
+
+means = tapply(epi.long$Rate, list(epi.long$Time,epi.long$trt), mean)
+
+matplot(c(0,2,4,6,8),means,col=c(1,1),lty=c(3,1),type="o",pch=c(1,16),xlab="Time (weeks)",ylab="Mean rate of seizures (per week)",ylim=c(2.5,5.0),main="Figure 1b: Mean Rate of Seizures by Treatment Group")
+
+legend(3.5,3.0, c("Placebo","Progabide"), lty=c(3,1))
+```
+
+1c: <br>
+There is no particular time trends reflected across the individual plots for the Progabide group
+```{r}
+Prog = epi.long[epi.long$trt=="Progabide",]
+
+# Progabide group
+xyplot(Rate ~ Time | factor(ID), data=Prog, type="o",main="Response Trajectories in Progabide Group",xlab="Time (weeks)", ylab="Rate of Seizures (per week)")
+```
+
+1d:
+Similarly, there is no particular time trends reflected across the individual plots for the Placebo group
+```{r}
+Plac = epi.long[epi.long$trt=="Placebo",]
+
+# Placebo group
+xyplot(Rate ~ Time | factor(ID), data=Plac, type="o",main="Response Trajectories in Placebo Group",xlab="Time (weeks)", ylab="Rate of Seizures (per week)")
+```
+
+1e: <br>
+It seems that individuals in the Progabide group have higher variance across all weeks (except in week 6)
+```{r}
+cov(epilepsy[epilepsy$trt=="Placebo",4:8])
+cov(epilepsy[epilepsy$trt=="Progabide",4:8])
+```
+
+1f:<br>
+$H_0:$ The mean change in rate of seizures from the baseline to the last week of the study is equal to zero.<br>
+$H_a:$ The mean change is not equal to zero.<br>
+Test Statistic: 1.054 ~ t(30)<br>
+P-value: 0.3003<br>
+Conclusion: We fail to reject the null hypothesis and conclude that the mean change is not significantly different from 0 for the Progabide group.
+```{r}
+Pro.W0 = epilepsy$Week0[epilepsy$trt=="Progabide"]
+Pro.W8 = epilepsy$Week8[epilepsy$trt=="Progabide"]
+t.test(Pro.W0, Pro.W8, paired=T, alternative="two.sided")
+```
+
+1g:<br>
+$H_0:$ The mean change in rate of seizures from the baseline to the last week of the study is the same in both groups.<br>
+$H_a:$ The mean change differs between the two groups.<br>
+Test Statistic: -1.0656 ~ t(54)<br>
+P-value: 0.2913<br>
+Conclusion: We fail to reject the null and conclude that the mean change in rate of seizures from the baseline to the last week of the study is not significantly different from each other.
+```{r}
+Diffs = epilepsy$Week8 - epilepsy$Week0
+Pro.D = Diffs[epilepsy$trt=="Placebo"]
+Pla.D = Diffs[epilepsy$trt=="Progabide"]
+t.test(Pla.D, Pro.D, mu=0, alternative="two.sided")
+```
+
+## Problem 2
+
+2a: <br>
+For all weeks, the summary statistics are pretty comparable to each other.
+```{r}
+exercise = read.csv("D:\\Coding\\Stats112\\Data\\exercise.csv")
+summary(exercise)
+```
+
+2b: <br>
+It seems that the muscle strength in all the weeks are highly positively correlated with each other.
+We exclude the id because it doesn't convey any useful information in the analysis.
+```{r}
+ggpairs(select(exercise, -id))
+```
+
+2c: <br>
+On week 0, participants in the weight-increase program have a higher muscle strength on average.
+```{r}
+exercise %>%
+ggplot(aes(x = program, y = week_0)) + geom_boxplot()
+```
+
+2d:
+```{r}
+long_exercise <- exercise %>%
+pivot_longer(cols = starts_with("week"), names_to = "week", values_to = "muscle_strength")
+glimpse(long_exercise)
+```
+
+2e: <br>
+The change in the magnitude of muscle strength for the repetitions_increase group is not obvious, it fluctuates. <br>
+However, it seems that the spread of the observation is getting larger.
+```{r}
+long_exercise %>%
+ggplot(aes(x = program, y = muscle_strength)) +
+geom_boxplot() +
+facet_wrap(~week, nrow = 3)
+```
+
+2f: <br>
+The result aligns with the observation in part e.
+```{r}
+long_exercise %>%
+group_by(program, week) %>%
+summarize(mean_muscle_strength = mean(muscle_strength, na.rm = TRUE),
+sd_muscle_strength = sd(muscle_strength, na.rm = TRUE))
+```
+
+2g: <br>
+No much trend is presented in this individual plot.
+```{r}
+long_exercise <- long_exercise %>%
+mutate(week_numeric = str_sub(week, 5, 6),
+week_numeric = as.numeric(as.factor(week_numeric))) %>%
+relocate(week_numeric, .after = week)
+
+long_exercise %>%
+ggplot(aes(x = week_numeric, y = muscle_strength,
+group = id, color = factor(id))) + geom_point(show.legend = FALSE) +
+geom_line(show.legend = FALSE) + labs(x = "Week", y = "Muscle Strength")
+```
+
+2h: <br>
+For both programs, the mean muscle strength first increases and then decreases. <br>
+Interestingly, repetitions_increase group experience a big drop in muscle strength going from week 4 to week 6
+```{r}
+long_exercise %>%
+group_by(week_numeric, program) %>%
+summarize(mean_muscle_strength = mean(muscle_strength, na.rm = TRUE)) %>%
+ggplot(aes(x = week_numeric, y = mean_muscle_strength, color = program)) +
+geom_point() +
+geom_line() +
+labs(x = "Week", y = "Mean Muscle Strength")
+```

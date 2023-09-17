@@ -1,0 +1,109 @@
+c
+library(lattice)
+library(nlme)
+library(lme4)
+library(geepack) 
+library(survival)
+library(emdbook)
+```
+
+## Problem 1
+1a:  
+```{r}
+times = c(1,1,1,6,7,7,10,10,11,12,17,17,19,23,rep(24,29))
+event = c(1,1,0,1,0,0,1,1,1,1,0,0,1,1,rep(0,29))
+cbind(bank=1:43,times,event)
+```
+
+1b:  
+```{r}
+Time_interval = c(1, 6, 10, 11, 12, 19, 23)
+nj = c(43, 40, 37, 35, 34, 31, 30)
+dj = c(2, 1, 2, 1, 1, 1, 1)
+nj_dj_divides_nj = (nj-dj)/nj
+S_t = rep(0, 7)
+for (i in 1:7){
+    S_t[i] = prod(nj_dj_divides_nj[1:i])
+}
+round(cbind(Time_interval, nj, dj, nj_dj_divides_nj, S_t),3)
+```
+
+1c:  
+The 80-th percentile survival time is at month 19.  
+The 95% confidence interval for this estimate is (0.643, 0.896).  
+We are 95% confident that about 64.3% to 89.6% of the banks will not fail before month 19.
+```{r}
+m1 = survfit(Surv(times,event) ~ 1, conf.type="log-log") 
+summary(m1)
+```
+
+1d:  
+```{r}
+plot(m1,xlab="Time (months)",ylab="Estimated probability of survival", 
+     main="Post-Recession Bank Survival")
+```
+
+1e:  
+It's not appropriate to treat the bank acquisitions as non-informative censoring because it is reasonable to consider that the bank was acquired when it was on the verge of bankruptcy.  
+
+## Problem 2
+2a:  
+In general, treatment2 (The placebo group) has a higher probability of survival, and females seem to have a higher probability of survival than males.
+```{r}
+data(pbc)
+PBC = pbc[!is.na(pbc$trt),]
+
+km = survfit(Surv(time, status==2) ~ trt+sex, conf.type="log-log", data=PBC)
+plot(km,col=c(2,2,3,3),lty=c(1,2,1,2),xlab="Time (days)",
+     ylab="Estimated Survival Probability",
+     main="K-M Survival Curves by Treatment and Sex", 
+     mark.time=FALSE)
+legend("bottomleft",c("Males on Trt 1", "Females on Trt 1", 
+     "Males on Trt 2", "Females on Trt 2"),
+     col=c(2,2,3,3),lty=c(1,2,1,2))
+```
+
+2b:  
+H0: S_i(t) = S_i(t) for i = treatment groups  
+Ha: H0 is not true  
+test statistic: 0.0627 ~ chi_squared(1)  
+p-value: 0.8  
+decision: fail to reject the null   
+conclusion: the survival time between the two treatment groups are the same for all time.  
+```{r}
+survdiff(Surv(time, status==2) ~ trt+strata(sex), data=PBC)
+```
+
+2c:  
+H0:  S_ij(t) = S_ij(t) for all i, j = 1, 2, (group and sex)   
+2c treats it as 4 different groups, and 2b treats it as 2 groups stratified by sex.  
+```{r}
+survdiff(Surv(time, status==2) ~ trt+sex, data=PBC)
+```
+
+2d:  
+$\ln{\frac{h_i(t)}{h_0(t)}} = 1.08* \ln{bili}$  
+where bili is the serum bilirunbin in mg/dl  
+1 percentage change in serum bilirunbin will result in a relative change in hazard ratios of $e^{1.08}$
+```{r}
+PBC$log.bili = log(PBC$bili)
+mod.d = coxph(Surv(time,status==2)~log.bili,data=PBC)
+summary(mod.d)
+```
+
+2e:  
+$\frac{h_i(t)}{h_0(t)} = 2.69* \ln{bili} + 1.06* edema0.5 + 12.05* edema1 + 1.04* age + 1.21* \ln{bili}* edema0.5 + 0.60*\ln{bili}* edema1$  
+where bili is the serum bilirunbin in mg/dl, age is in years, edema0.5 is untreated or successfully treated, and edema1 being edema despite diuretic therapy.  
+If no edema, 1 percentage change in serum bilirunbin will result in a relative change in hazard ratios of 2.69.  
+For the group with edema despite diuretic therapy, 1 percentage change in serum bilirunbin will result in an additional relative change in hazard ratios of 1.21.  
+1 year increases in age will result in a relative change in hazard ratios of 1.04.  
+```{r}
+mod.e = coxph(Surv(time,status==2)~log(bili)*factor(edema)+age,data=PBC)
+summary(mod.e)
+```
+
+2f:  
+The p-value is 2.128*10^-9, so we reject the simpler model and conclude that edema and age are significant factors in hazard ratios.
+```{r}
+anova(mod.d, mod.e)
+```

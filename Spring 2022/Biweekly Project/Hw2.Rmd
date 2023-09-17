@@ -1,0 +1,142 @@
+---
+title: "Stats 112 Homework 2"
+author: "Owen Lin"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning=FALSE)
+```
+
+```{r}
+library(nlme)
+library(lme4)
+```
+
+
+## Problem 1
+```{r}
+setwd("D:\\Coding\\Stats112\\Data")
+NCGS = read.table("cholesterol-data.txt", na.strings=".")
+# remove observations with na entries
+NCGS = NCGS[complete.cases(NCGS), ]
+# Give col names
+names(NCGS) = c("Trt", "ID", "M0", "M6", "M12", "M20", "M24")
+# label Treatment
+NCGS$Trt = factor(NCGS$Trt, levels=c(2,1), labels=c("Placebo","HighDose"))
+# convert to long form
+NCGS.long = reshape(NCGS, varying=list(3:7), idvar="ID", timevar="Month", times=c(0,6,12,20,24), v.names="Chol", direction="long")
+# change month to time 1 2 3 4
+NCGS.long$Time = as.numeric(factor(NCGS.long$Month))
+```
+
+1a:  
+For both High Dose and Placebo group, the mean cholesterol level generally goes up as time progresses.
+```{r}
+means = tapply(NCGS.long$Chol, list(NCGS.long$Month, NCGS.long$Trt), mean)
+times = c(0,6,12,20,24)
+plot(times, means[,1], type="l", xlab="Month", 
+	ylab="Mean Serum Cholesterol (mg/dL)",
+	ylim=c(220,280), main="Mean Serum Cholesterol Trajectories by Treatment",
+	col="blue", lty=1, pch=15)
+points(times, means[,2], type="l",
+	col="red", lty=2, pch=16)
+legend("topleft",c("Placebo","High-Dose"),
+	col=c("blue","red"), lty=c(1,2), pch=c(15,16))
+```
+
+1b:  
+$Y_{ij} = β_1 + β_2* Trt_{ij} +β_3* I(Month = 6)_{ij} +β_4* I(Month = 12)_{ij} +β_5* I(Month = 20)_{ij} +β_6* I(Month = 24)_{ij}+β_7* TrtI(Month = 6)_{ij}+β_8* TrtI(Month = 12)_{ij}+β_9* TrtI(Month = 20)_{ij} + β_{10}*TrtI(Month = 24)_{ij} + \epsilon_i$  
+where $Trt_{ij} = 1$ for HighDose and = 0 for Placebo group
+```{r}
+mod.unst = gls(Chol ~ Trt+factor(Month)+Trt*factor(Month), data=NCGS.long, weight=varIdent(form = ~ 1 | Time),corr=corSymm(, form = ~ Time | ID))
+summary(mod.unst)
+```
+
+```{r, eval = FALSE}
+ttt = cbind(NCGS.long, rep(1, nrow(NCGS.long)))
+head(ttt)
+colnames(ttt)[6] = "newID"
+mod.cons = gls(Chol ~ Trt+factor(Month)+Trt*factor(Month), data=ttt, weight=varIdent(form = ~ 1 | Time),corr=corAR1(, form = ~ Time))
+summary(mod.cons)
+```
+
+
+1c:  
+The estimated correlation between time 1 and time 2 is 0.764, whereas the estimated correlation between time 1 and time 5 is 0.606.
+
+1d:  
+```{r}
+mod.ar = gls(Chol ~ Trt+factor(Month)+Trt*factor(Month), data=NCGS.long,corr=corAR1(, form = ~ Time | ID))
+summary(mod.ar)
+```
+
+1e:  
+The estimated correlation between time 1 and time 2 is 0.755, whereas the estimated correlation between time 1 and time 5 is $0.755^4 = 0.325$.
+
+1f:  
+I would go with the model in part b (the unstructured model) because it has a lower AIC.
+
+1g:  
+H_0: ar(1) model is better.  
+H_a: unstructured model is better.  
+p-value: <0.0001  
+Conclusion:  We reject null and conclude that unstructured model is better, which does agree with the conclusion in part 1f.
+```{r}
+anova(mod.ar, mod.unst)
+```
+
+1h:  
+```{r}
+mod.h = gls(Chol ~ Trt + as.numeric(Month) + Trt:as.numeric(Month), data=NCGS.long, weight=varIdent(form = ~ 1 | Time),corr=corSymm(, form = ~ Time | ID), method = "ML")
+summary(mod.h)
+```
+
+1i:  
+$Y_{ij} = β_0 + β_1* Trt_{ij} + β_2* t_{ij} + β_3* t^{2}_{ij} + β_4* Trt_{ij}t_{ij} + β_5* Trt_{ij}t^{2}_{ij} + \epsilon_i$
+```{r}
+Month2 = as.numeric(NCGS.long$Month)^2
+mod.exp = gls(Chol ~ Trt + as.numeric(Month) + Trt*as.numeric(Month) + Month2 + Trt*Month2, data=NCGS.long, weight=varIdent(form = ~ 1 | Time),corr=corSymm(, form = ~ Time | ID), method="ML")
+summary(mod.exp)
+```
+
+1j:  
+The model in part i (with quadratic terms) fit the data better based on likelihood ratio test at 95% confident level.
+```{r}
+anova(mod.h, mod.exp)
+```
+
+## Problem 2
+2a:  
+The marginal mean (population expectation) cholesterol level for a male subject on day 20 is  
+$\beta_0 + \beta_1* 20 + \beta_2* 1$
+
+2b:  
+The conditional mean (conditional expectation) cholesterol level for a male subject on day 20 is
+$\beta_0 + \beta_1* 20 + \beta_2* 1 + b_{0,i} + b_{1,i}* 20$
+
+2c:  
+The difference in marginal mean cholesterol levels between a male subject on day 20 and a female subject on day 20 is  
+$\beta_2* 1$
+
+2d:  
+The difference in conditional mean cholesterol levels between a male subject on day 20 and a female subject on day 20 is  
+$\beta_2* 1 + b_{0,i1} + b_{1,i1}* 20 - b_{0,i2} - b_{1,i2}* 20$  
+where i1 represent a male subject and i2 represent a female subject
+
+2e:  
+For different individual, they could start with a different level of cholesterol, this is captured in random intercept ($b_{0,i}$). Similarly, the change in cholesterol level varies for different individual, this is captured in random slope ($b_{1,i}$).
+
+## Problem 3
+3a:  
+$E(\bar{Y_i}|X) = \beta_0 + \beta_1* \bar{x_{1i}} + \beta_2* \bar{x_{2i}}$
+
+3b:  
+We should weight the variance of each instructor's average rating by the number of raters because $var(\bar{Y_i}) = \frac{1}{n_i}* var(Y_{ij})$
+
+```{r}
+library(alr4)
+data(Rateprof)
+gls = gls(quality ~ easiness + helpfulness, data = Rateprof)
+coef(gls)
+```

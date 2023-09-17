@@ -1,0 +1,273 @@
+---
+title: "Stats 111 Homework 4"
+author: "Owen Lin"
+output: html_document
+---
+```{r, include=F}
+library(pROC)
+
+ifelse1 =function(test, x, y){ if (test) x else y}
+
+#  Function to exponentiate coefficients and produces CIs for GLMs
+glmCI <- function( model, transform=TRUE, robust=FALSE ){
+	link <- model$family$link
+	coef <- summary( model )$coef[,1]
+	se <- ifelse1( robust, robust.se.glm(model)[,2], summary( model )$coef[,2] )
+	zvalue <- coef / se
+	pvalue <- 2*(1-pnorm(abs(zvalue)))
+
+	if( transform & is.element(link, c("logit","log")) ){
+		ci95.lo <- exp( coef - qnorm(.975) * se )
+		ci95.hi <- exp( coef + qnorm(.975) * se )
+		est <- exp( coef )
+	}
+	else{
+		ci95.lo <- coef - qnorm(.975) * se
+		ci95.hi <- coef + qnorm(.975) * se
+		est <- coef
+	}
+	rslt <- round( cbind( est, ci95.lo, ci95.hi, zvalue, pvalue ), 4 )
+	colnames( rslt ) <- ifelse1( 	robust, 	
+					c("Est", "robust ci95.lo", "robust ci95.hi", "robust z value", "robust Pr(>|z|)"),
+					c("Est", "ci95.lo", "ci95.hi", "z value", "Pr(>|z|)") )			
+	colnames( rslt )[1] <- ifelse( transform & is.element(link, c("logit","log")), "exp( Est )", "Est" )
+	rslt
+	}
+
+#	Function to estimate linear contrasts of coefficients from a GLM fit
+linContr.glm <- function( contr.names, contr.coef=rep(1,length(contr.names)), model, transform=TRUE ){
+	beta.hat <- model$coef 
+	cov.beta <- vcov( model )
+
+	contr.index <- match( contr.names, dimnames( cov.beta )[[1]] )	
+	beta.hat <- beta.hat[ contr.index ]
+	cov.beta <- cov.beta[ contr.index,contr.index ]
+	est <- contr.coef %*% beta.hat
+	se.est <- sqrt( contr.coef %*% cov.beta %*% contr.coef )
+	zStat <- est / se.est
+	pVal <- 2*pnorm( abs(zStat), lower.tail=FALSE )
+	ci95.lo <- est - qnorm(.975)*se.est
+	ci95.hi <- est + qnorm(.975)*se.est
+	
+	link <- model$family$link
+	if( transform & is.element(link, c("logit","log")) ){
+		ci95.lo <- exp( ci95.lo )
+		ci95.hi <- exp( ci95.hi )
+		est <- exp( est )
+		cat( "\nTest of H_0: exp( " )
+		for( i in 1:(length( contr.names )-1) ){
+			cat( contr.coef[i], "*", contr.names[i], " + ", sep="" )
+			}
+		cat( contr.coef[i+1], "*", contr.names[i+1], " ) = 1 :\n\n", sep="" )		
+		}
+	else{
+		cat( "\nTest of H_0: " )
+		for( i in 1:(length( contr.names )-1) ){
+			cat( contr.coef[i], "*", contr.names[i], " + ", sep="" )
+			}
+		cat( contr.coef[i+1], "*", contr.names[i+1], " = 0 :\n\n", sep="" )
+		}
+	rslt <- data.frame( est, se.est, zStat, pVal, ci95.lo, ci95.hi )
+	colnames( rslt )[1] <- ifelse( transform && is.element(link, c("logit","log")), "exp( Est )", "Est" )
+	round( rslt, 8 )
+}
+
+# Deviance test (likelihood ratio)
+lrtest <- function( fit1, fit2 ){
+	cat( "\nAssumption: Model 1 nested within Model 2\n\n" )
+	rslt <- anova( fit1, fit2 )
+	rslt <- cbind( rslt, c("", round( pchisq( rslt[2,4], rslt[2,3], lower.tail=FALSE ), 4 ) ) )
+	rslt[,2] <- round( rslt[,2], 3 )
+	rslt[,4] <- round( rslt[,4], 3 )
+	rslt[1,3:4] <- c( "", "" )
+	names( rslt )[5] <- "pValue"
+	rslt
+}
+
+# H-L goodness of fit test
+binary.gof <- function( fit, ngrp=10, print.table=TRUE ){
+	y <- fit$y
+	phat <- fitted( fit )
+	fittedgrps <- cut( phat, quantile( phat, seq(0,1,by=1/ngrp) ), include.lowest=TRUE )
+	n <- aggregate( y, list( fittedgrps ), FUN=length )[,2]
+	Obs <- aggregate( y, list( fittedgrps ), FUN=sum )[,2]
+	Exp <- aggregate( phat, list( fittedgrps ), FUN=sum )[,2]
+	if( print.table==TRUE ){
+		cat( "\nFitted Probability Table:\n\n" )
+		rslt <- as.data.frame( cbind( 1:ngrp, n, Obs, Exp ) )
+		names( rslt )[1] <- "group"
+		print( rslt )
+	}
+	chisqstat <- sum( (Obs - Exp)^2 / ( Exp*(1-Exp/n) ) )
+	df <- ngrp-2
+	pVal <- pchisq( chisqstat, df, lower.tail=FALSE )
+	cat( "\n Hosmer-Lemeshow GOF Test:\n\n" )
+	cbind( chisqstat, df, pVal )
+}
+
+# Function to compute robust se for glms
+robust.se.glm<-function(glm.obj){
+	## 	Compute robust (sandwich) variance estimate
+	if (is.matrix(glm.obj$x)) 
+		xmat<-glm.obj$x
+	else {
+		mf<-model.frame(glm.obj)
+		xmat<-model.matrix(terms(glm.obj),mf)		
+	}
+	umat <- residuals(glm.obj,"working")*glm.obj$weights*xmat
+	modelv<-summary(glm.obj)$cov.unscaled
+	robust.cov <- modelv%*%(t(umat)%*%umat)%*%modelv
+	
+	##	Format the model output with p-values and CIs
+	s <- summary( glm.obj) 
+	robust.se <- sqrt( diag( robust.cov )) 
+	z <- glm.obj$coefficients/robust.se
+	p <- 2*pnorm( -abs( z ) ) 
+	ci95.lo <- glm.obj$coefficients - qnorm( .975 ) * robust.se
+	ci95.hi <- glm.obj$coefficients + qnorm( .975 ) * robust.se
+	rslt <- cbind( glm.obj$coefficients, robust.se, ci95.lo, ci95.hi, z, p ) 
+	dimnames(rslt)[[2]] <- c( dimnames( s$coefficients )[[2]][1], "Robust SE", "ci95.lo", "ci95.hi", dimnames( s$coefficients )[[2]][3:4] ) 
+	rslt 
+	}
+```
+
+
+1. a. The null deviance is 75.791, the residual deviance is 73.594. There isn't much difference between these two, that signifies Sex as a covariate does not provide much information on the acceptance status
+```{r, results = "hold"}
+mcat = read.table("D:\\Coding\\Stats111\\Data\\MedGPA.txt", fill=TRUE, header=TRUE)
+logit1a = glm(Acceptance~Sex, family = binomial(link = "logit"), data = mcat)
+summary(logit1a)
+```
+
+b. Null deviance is the same because it compares the null model (with only intercept) to the saturated model, it doesn't matter what we fit in our model. On the other hand, residual deviance compares our model to the saturated model, so it changes with respect to our covariate. There is a big difference between the two (larger than 10 compare to the small difference in part a). So MCAT is a better indicator of the acceptance status.
+```{r}
+logit1b = glm(Acceptance~MCAT, family = binomial(link = "logit"), data = mcat)
+summary(logit1b)
+```
+
+c. To create a test statistic for 1b, we would use Null Deviance - Residual Deviance.
+    H0: null model holds (fit the data well enough)
+    Ha: The proposed model is better than the null model
+    test statistic: 75.791 - 64.697 = 11.094 ~ chi_squared(1)
+d. $\ln{\frac{p}{1-p}} = -6.18 - 7.12*I(Sex = Male) + 0.19*MCAT + 0.17*I(Sex = Male)*MCAT$ <br>
+    For male, one unit increase in MCAT leads to $e^{0.19+0.17}$ times  estimated odds of getting accepted. <br>
+    For female, one unit increase in MCAT leads to $e^{0.19}$ times estimated odds of getting accepted.
+```{r}
+logit1d = glm(Acceptance ~ Sex + MCAT + Sex*MCAT, family = binomial(link = "logit"), data = mcat)
+summary(logit1d)
+```
+
+e. The 95% confidence interval for the estimated odds ratio from a 1 unit increase in MCAT score for a male is (1.06, 1.93) <br>
+We are 95% confident that the true odds ratio for 1 unit increase in MCAT score is between 1.06 and 1.93. <br>
+The 95% confidence interval for the estimated odds ratio from a 5 unit increase in MCAT score for a male is (1.35, 26.68)
+```{r, results = "hold"}
+linContr.glm(c("MCAT","SexM:MCAT"), c(1,1), model=logit1d)
+linContr.glm(c("MCAT","SexM:MCAT"), c(5,5), model=logit1d)
+```
+
+f. H0: $\beta_1 = \beta_3 = 0$
+    Ha: H0 is not true
+    p-value: 0.1516
+    conclusion: Fail to reject the null, so Sex should not be included as a covariate.
+```{r}
+lrtest(logit1b, logit1d)
+```
+
+2. a. $\ln{\frac{p}{1-p}} = -1.31 + 0.00183*sqft - 0.0000343*lot + 1.40*Pool$ <br>
+    The difference between the null deviance and the residual deviance is large.
+```{r, results = "hold"}
+MidwestSales = read.table("D:\\Coding\\Stats111\\Data\\MidwestSales.txt", fill=TRUE, header=FALSE)
+names(MidwestSales)=c("id","price","sqft","bed","bath","ac","garage","pool","year","quality","style","lot","hwy")
+logit2a = glm(ac~sqft+lot+pool, family=binomial(link="logit"), data=MidwestSales)
+summary(logit2a)
+```
+
+b. The area under the curve is 0.7649. The model is doing a good job on predicting ac because the area is higher than 0.5.
+```{r, results = "hold"}
+roc.curve = roc(MidwestSales$ac~fitted(logit2a))
+plot(roc.curve)
+roc.curve
+```
+
+c. The variance specification is not appropriate: heavy heteroskedasticity in Pearson residual.
+```{r, results="hold"}
+par(mfrow=c(1,2))
+presids = residuals(logit2a, type="pearson")
+muhat = fitted(logit2a)
+plot(muhat, presids^2, xlab="Fitted expected counts", ylab="Pearson Residual Squared")
+sfit = supsmu(muhat, presids^2)
+lines(sfit$x[order(sfit$x)] , sfit$y[order(sfit$x)], col="red", lwd=2)
+
+plot(muhat, presids^2, xlab="Fitted expected counts", ylab="Pearson Residual Squared", ylim=c(0,10))
+sfit = supsmu(muhat, presids^2)
+lines(sfit$x[order(sfit$x)] , sfit$y[order(sfit$x)], col="red", lwd=2)
+```
+
+d. The observation with the highest leverage has a sqft of 1550 and a lot size of 14998 which are way below the average house. Also, it has a pool when the average house in the sample don't.
+```{r}
+MidwestSales[which(hatvalues(logit2a) == max(hatvalues(logit2a))),]
+```
+
+e. We are 95% confident that the true odds ratio(large to small) for ac comparing two houses that differ in sqft by 500 and lot size by 1500 is between 1.76 and 3.19.
+```{r}
+linContr.glm(c("sqft" , "lot") , c(500,1500) , model=logit2a)
+```
+
+3. Holding other the same, younger people below the age of 35 has $e^{-1.32}$ times the estimated odds of using oral contraceptives than people who is 35 or older. <br>
+    Holding other the same, White has $e^{0.622}$ times the estimated odds of using oral contraceptives than non-White. <br>
+    Holding other the same, people who get more than 1 year of college education has $e^{0.501}$ times the estimated odds than people who has fewer than 1 year of college education. <br>
+    Holding other the same, people who are married has $e^{-0.46}$ times the estimated odds than people who are not married. <br>
+	We are 95% confident that the true odds ratio comparing contraceptive use for those who get more than 1 year of college education to those who don't is between $e^{0.501-1.96*0.077}$ and $e^{0.501+1.96*0.077}$
+
+4. a. See below
+```{r}
+nhanes = read.table("D:\\Coding\\Stats111\\Data\\nhaneshw.txt", header=TRUE)
+nhanes$agegrp = cut(nhanes$age, breaks=c(0,30,40,50,60,71), right=FALSE)
+lapply(split(nhanes, nhanes$male), summary)
+```
+
+b.  $\ln{\frac{p}{1-p}} = -4.37 + 0.81*I(30<=age<40) + 1.58*I(40<=age<50) + 2.02*I(50<=age<60) + 2.70*I(60<=age<71) + 0.02* wt - 0.03*I(male)$ <br>
+    People who's in the age group of 30 - 40 has 2.2562 times the estimated odds than people who's below age of 30 or who's above 71. <br>
+    H0: The null model with just an intercept fit the data well enough <br>
+    Ha: The proposed model is better <br>
+    test statistic: 387.337~chi_squared(4) <br>
+    p-value: ~= 0 <br>
+    conclusion: we reject the null and conclude that the proposed model with age group is better.
+```{r}
+fit1.full = glm( htn ~ factor(agegrp) + wt + male, family=binomial, data=nhanes )
+glmCI( fit1.full, transform = F)
+fit1.red = glm( htn ~ wt + male, family=binomial, data=nhanes )
+lrtest( fit1.red, fit1.full )
+```
+
+c. $\ln{\frac{p}{1-p}}= -4.97 + 0.77* I(30<=age<40) + 2.10* I(40<=age<50) + 2.69* I(50<=age<60) + 3.49* I(60<=age<71) + 0.01* wt + 1.00* I(male) + 0.02* I(30<=age<40)* I(male) - 0.95* I(40<=age<50)* I(male) -1.24* I(50<=age<60)* I(male) - 1.46* I(60<=age<71)* I(male)$ <br>
+	For a male, being in the age group of 30-40 gives an additional $\exp{0.02}$ times the estimated odds of hypertension than males who's below the age of 30 or who's above 71 in the model without interaction. <br>
+	Beta for the interaction term: how the effect of sex is different between two age group or how the effect of two age group is different between male and female. <br>
+	H0: All coefficients for the interaction terms <br>
+	Ha: H0 does not hold <br>
+	test statistic: 32.897 ~ chi_squared(4) <br>
+	p-value: ~= 0 <br>
+	conclusion: We reject the null and conclude that at least one coefficient for the interaction term is nonzero. 
+```{r}
+fit2 = glm(htn ~ factor(agegrp) + wt + male + factor(agegrp)*male, family=binomial, data=nhanes)
+glmCI(fit2, transform=FALSE)
+lrtest(fit1.full, fit2)
+```
+
+d. 1. The estimated odds is 0.549, with a 95% CI of (0.45, 0.67) <br>
+	2. The probability of hypertension for this same person is 0.35 <br>
+	3. The estimated odds ratio for hypertension is 2.39, with a 95% CI of (1.70, 3.37) <br>
+	4. The estimated odds ratio is 3.99, with a 95% CI of (2.82, 5.65) <br>
+```{r, results = "hold"}
+# aggregate(nhanes$wt, list(nhanes$male, nhanes$agegrp), mean)
+linContr.glm(contr.names=c("(Intercept)", "factor(agegrp)[60,71)", "wt", "male", "factor(agegrp)[60,71):male"), contr.coef=c(1,1,85.543,1,1), model=fit2)
+
+linContr.glm(contr.names=c("(Intercept)", "factor(agegrp)[60,71)", "wt", "male", "factor(agegrp)[60,71):male"), contr.coef=c(1,1,85.543,1,1), model=fit2, transform=FALSE)
+exp(-0.599)/(1+exp(-0.599))
+
+linContr.glm( contr.names=c( "factor(agegrp)[40,50)", "factor(agegrp)[60,71)", "factor(agegrp)[40,50):male", "factor(agegrp)[60,71):male"), contr.coef=c(-1,1,-1,1), model=fit2 )
+
+linContr.glm(contr.names=c( "factor(agegrp)[40,50)", "factor(agegrp)[60,71)"), contr.coef=c(-1,1), model=fit2)
+```
+
+e. Both age group and gender along with the interactions seem to be significant predictors of hypertension.

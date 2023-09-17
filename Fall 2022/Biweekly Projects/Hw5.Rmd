@@ -1,0 +1,117 @@
+---
+title: "Stats 110 Homework 5"
+author: "Owen Lin"
+date: 11/29/2022
+output: html_document
+---
+```{r, setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "D:/Coding/Stats110/Data")
+library(car)
+library(leaps)
+library(Rmisc)
+```
+
+1. a. You can't randomly assign an ethnic group to a mother and then observe    baby's weight. It can only be an observational study and thus omitted variable bias exist. For instant, it could be that mother from the same ethnic groups share a food preference shaped by the culture, which affect the birth weight of infants.
+    b. We can not extend our sample's results to all US births because a random (representative) sample in North Carolina is not necessarily a representative sample of the US.
+
+<br>
+
+2. a. See Output
+```{r,results = "hold"}
+blood <- read.table("Blood.txt", fill = TRUE, header = TRUE)
+blood$Overwt <- as.factor(blood$Overwt)
+blood$Smoke <- as.factor(blood$Smoke)
+boxplot(blood$SystolicBP ~ blood$Overwt, ylab = "Blood pressure", xlab = "Weight group")
+```
+
+b. Weight group 0 : mean = 136.31, sd = 27.26, size = 187 <br>
+    Weight group 1 : mean = 144.36, sd = 25.07, size = 109 <br>
+    Weight group 2 : mean = 153.18, sd = 27.81, size = 204 <br>
+```{r,results = "hold"}
+tapply(blood$SystolicBP, blood$Overwt, mean)
+tapply(blood$SystolicBP, blood$Overwt, sd)
+tapply(blood$SystolicBP, blood$Overwt, length)
+```
+
+c.  The sample standard deviations are roughly equal. Thus, it is appropriate to conduct an analysis of variance.
+d. $SystolicBP_i = \mu + \alpha_k + \epsilon_{i,k}$, k = 0, 1, 2 <br>
+    H0: $\alpha_k = 0$ for all k <br>
+    Ha: At least 1 $\alpha_k$ does not equal to zero.
+e.  H0: The difference between the mean blood pressure for three weight groups is 0. <br>
+    Ha: H0 is false.
+f. Test statistic: 19.02 ~ F(2, 497)
+    p-value: 1.1e-08 < 0.05
+    Conclusion: we reject the null and conclude at least one weight group 
+```{r,results = "hold"}
+ano2f <- aov(SystolicBP ~ Overwt, data = blood)
+summary(ano2f)
+```
+
+g. It seems like weight group 2 is significantly different than both 1 and 0 at 95% confidence
+```{r,results = "hold"}
+TukeyHSD(ano2f, ordered = T)
+plot(TukeyHSD(ano2f, ordered = T))
+```
+
+h. $SystolicBP_i = \mu + \alpha_k + \beta_j + \epsilon_{i,k,j}$, k = 0, 1, 2; j = 0, 1
+i. See Output.
+```{r,results = "hold"}
+ano2h <- aov(SystolicBP ~ Overwt + Smoke, data = blood)
+summary(ano2h)
+```
+
+j. H0: $\beta_j = 0$ for all j. <br>
+    Ha:  H0 is false. <br>
+    Test statistic: 14.44 ~ F(1, 496) <br> 
+    p-value: 0.000163 < 0.05 <br>
+    Conclusion: we reject the null and conclude that smoke does
+k. $SystolicBP_i = \mu + \alpha_k + \beta_j + \gamma_{kj} + \epsilon_{ikj}$, k = 0, 1, 2; j = 0, 1
+l. H0: $\gamma_{kj} = 0$ for all j. <br>
+    Ha:  H0 is false. <br>
+    Test statistic: 0.539 ~ F(2, 494) <br> 
+    p-value: 0.583614 > 0.05 <br>
+    Conclusion: we fail to reject the null and conclude that Overwt and Smoke do not have an interaction effect on the mean SystolicBP.
+```{r,results = "hold"}
+ano2l <- aov(SystolicBP ~ Overwt + Smoke + Overwt*Smoke, data = blood)
+# summary(ano2l)
+```
+
+<br>
+
+3. a. Response variable: amount eaten <br> 
+    First factor: Male or Female <br> 
+    Second factor: leptin or insulin injection
+    b. First factor: Observational with 2 levels <br> 
+    Second factor: experimental with 2 levels
+    c. The results indicate that there is an interaction between the two factors in their effect on the response, because the affect of second factor is different base on gender.
+
+<br>
+
+4. a. Response variable: score on the set of  math problems <br> 
+    First factor: hyperactive or not <br> 
+    Second factor: high noise and low noise
+    b. First factor: Observational with 2 levels <br> 
+    Second factor: experimental with 2 levels
+    c. The results indicate that there is an interaction between the two factors in their effect on the response, because the performance under high noise and low noise is different base on the level of first factor.
+
+<br>
+
+5. a. $\mu$ = (12+17+14+16)/4 = 14.75
+    b. $\alpha_1$ = (12+17)/2 - 14.75 = -0.25 <br>
+        $\alpha_2$ = (14+16)/2 - 14.75 = 0.25
+    c. $\beta_1$ = (12+14)/2 - 14.75 = -1.75 <br>
+        $\beta_2$ = (17+16)/2 - 14.75 = 1.75
+    d. $\gamma_{11}$ = 12 - 14.75 - (-0.25 + -1.75) = -0.75 <br>
+    $\gamma_{12}$ =  17 - 14.75  - (-0.25 + 1.75) = 0.75 <br>
+    $\gamma_{21}$ =  14 - 14.75 - (0.25 + -1.75) = 0.75 <br>
+    $\gamma_{22}$ =  16 - 14.75 - (0.25 + 1.75) = -0.75
+
+<br>
+
+6. K=2, J=2, n=25 (N = 100)
+```{r,results = "hold"}
+table <- data.frame(Source = c('Face', 'Gender', 'Interaction', 'Residual', 'Total'), df = c(1, 1, 1, 96, 99), SS = c(12915, 2500, 400, 9600, 25415), MS = c(12915, 2500, 400, 100, 15915), F = c(129.15, 25, 4, NA, NA))
+
+table
+```
+

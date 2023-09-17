@@ -1,0 +1,110 @@
+---
+title: "Stats 110 Homework 3"
+author: "Owen Lin"
+output: html_document
+---
+
+1. a. Yes, Model 1 is nested under Model 2
+    b. $\beta_1 = 0$ implies X1 does not affects the response Y given X2 is in the model
+    c. If $\beta_3 \neq 0$, it implies that the impact of X1 on Y depends on the value of X2
+    d. H0: $\beta_2 = \beta_3 = 0$ <br>
+        Ha: At least one of the $\beta_2$ or $\beta_3$ is not 0 <br>
+        $\beta_2$ is direct effect and $\beta_3$ is the indirect effect.
+    e. H0: $\beta_1 = \beta_2 = 0$ <br>
+        Ha: H0 is not true <br>
+    f. When X2 = 0, model 2 becomes $y_i = \beta_0 + \beta_1*x_{i1}$, so one unit change in X1 results in $\beta_1$ unit change in Y <br>
+        When X2 = 1, model 2 becomes $y_i = (\beta_0 + \beta_2) + (\beta_1 + \beta_3)*x_{i1}$, one unit change in X1 results in $\beta_1+\beta_3$ unit change in Y
+<br>
+
+2. a. Need more information, depend on how effective is the new regressor given the existing p regressors.
+    b. Model 1 and 2 have the same SSTO, because the dataset didn't change based on the model.
+    c. Model 1 likely has a lower sum of square error(SSE) than model 2. The additionally regressor only helps the prediction or it doesn't help at all at worse.
+    d. $\beta_j$ Very likely to be different. The new regressor will likely affecting the previous regressors. 
+    When the new regressor is categorical, the slope coefficience may not change
+<br>
+
+3. a. $rest_i = \beta_0 + \beta_1*Hgt_i + \beta_2*Wgt_i + \beta_3*Smoke_i + \beta_4*Hgt_i*Wgt_i + \epsilon_i$ 
+    b. For example, a weight increase of 20 pounds might not be as big of a deal to a 190cm tall person, but it will impact someone who's 150cm greatly.
+    c. $rest_i = 181.48 - 1.61*Hgt_i - 0.50*Wgt_i + 5.75*Smoke_i + 0.01*Hgt_i*Wgt_i$, The adjusted r square is 0.08
+```{r}
+pulse <- read.table("D:\\Coding\\Stats110\\Data\\Pulse.txt", fill = TRUE, header = TRUE) # nolint
+model_pulse <- lm(Rest ~ Hgt + Wgt + Smoke + Hgt*Wgt, data = pulse)
+summary(model_pulse)
+```
+    
+d. Estimated SSE: 9.528^2*(227) = 20607.69
+e. H0: $\beta_1 = \beta_2 = \beta_3 = \beta_4 = 0$ <br>
+    Ha: At least one of the $\beta$ is not 0 <br>
+    Test-statistic: 6.215 ~ F(4, 227) <br>
+    p-value: 9.149*10^-5 <br>
+    Conclusion: reject the null at 95% significant level and conclude that at least one variable is a significant indicator of y
+f. H0: $\beta_4 = 0$ <br>
+    Ha: $\beta_4 \neq 0$ <br>
+    Test-statistic: 1.307 ~ t(227) <br>
+    p-value: 0.19264 <br>
+    Conclusion: fail to reject the null at 95% significant level, inconclusive.
+g. H0: $\beta_2 = \beta_4 = 0$ <br>
+    Ha: At least one of the $\beta$ is not 0 <br>
+h. Conclusion: fail to reject the null at 95% significant level with a p-value of 0.3903. In other word, we don't have evident 
+    that the model with weight as a regressor is better than the reduced model.
+```{r}
+model_full <- lm(Rest ~ Hgt + Wgt + Smoke + Hgt*Wgt, data = pulse)
+model_reduced <- lm(Rest ~ Hgt + Smoke, data = pulse)
+anova(model_reduced, model_full)
+```
+
+i. Adding weight when height is already in the model didn't add any explanatory strength to the model, SSR only increases by less than 0.1
+```{r}
+anova(model_full)
+```
+
+j. SSTO = 1346.2 + 0 + 756 + 155 + 20609.5 = 22866.7
+k. SSE: 22866.7 - 1346.2 = 21520.5 <br>
+    SSR: 1346.2 <br>
+    SSTO: 22866.7
+l. People who have a low weight might get that from exercise frequently, which could be the actual cause that cause the decrease in rest heart rate.
+m. It seems that fitted values around 72 varies more than other values. So a single constant $\sigma^2$ for the entire model is invalid.
+```{r}
+plot(model_pulse, 1)
+```
+
+n. The line is rather flat, so the linearity assumption is not violated.
+o. Most of the points still fit the line, other than one of the tails. The normality assumption does not have a big problem.
+```{r}
+plot(model_pulse, 2)
+```
+
+p. No, it doesn't make sense to predict the resting heart rate for someone who weight 350 pound, because it is outside of our sample range 
+    and we have no way to gurantee the extrapolation follows the same trend.
+```{r}
+summary(pulse)
+```
+
+<br>
+
+4. a. $Arsenic_i = \beta_0 + \beta_1*Year_i + \beta_2*Miles_i + \beta_3*Year_i*Miles_i + \epsilon_i$
+    b. $Lead_i = \beta_0 + \beta_1*Year_i + \beta_2*Iclean + \epsilon_i$ <br>
+        Iclean = 0: $Lead = \beta_0 + \beta_1*Year_i$ <br>
+        Iclean = 1: $Lead = \beta_0 + \beta_2 + \beta_1*Year_i$
+    c. $Titanium_i = \beta_0 + \beta_1^2*Miles_i$
+    d. $Sulfide_i = \beta_0 + \beta_1*Year_i + \beta_2*Miles_i + \beta_3*Depth_i + \beta_4*Year_i*Miles_i + \beta_5*Year_i*Depth_i + \beta_6*Miles_i*Depth_i + \epsilon_i$
+<br>
+
+5. a. As Mileage increase, the average price decreases.
+```{r}
+car <- read.table("D:\\Coding\\R\\Stats 110\\Data\\ThreeCars.txt", fill = TRUE, header = TRUE) #nolint
+plot(x = car$Mileage, y = car$Price, data = car)
+```
+
+b. See Code below
+```{r}
+model_car <- lm(Price ~ Mileage, data = car)
+plot(model_car, 1)
+```
+
+c. It seems that the relation is not linear but rather quadratic
+d. The variance is not constant. Generally speaking, cars with large Mileage also has a large variance
+e. Since the observations are all located closely around the line, the error is rather normal and is consistent with the assumption
+```{r}
+plot(model_car, 2)
+```
